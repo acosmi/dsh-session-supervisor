@@ -1,0 +1,8 @@
+node_modules/
+lib/
+dist/
+coverage/
+*.tgz
+spike/
+index.js
+tests/fixture-root-config.yml
