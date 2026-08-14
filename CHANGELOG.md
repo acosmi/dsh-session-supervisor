@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The project follows
 a `0.x` developer-preview cadence until a stable 1.0; breaking changes to the
 DeepSeek Harness platform are tracked in `docs/compatibility.md`.
 
-## Unreleased (0.1.0-beta.0)
+## 0.1.0-beta.0 (2026-08-13)
 
 - Pure domain core: strict ledger decoder, Guard/Policy/Incident state
   machine, three supervision policies (lifecycle silence, absolute deadline,
