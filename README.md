@@ -1,74 +1,62 @@
 # dsh-session-supervisor
 
-A durable, bounded lifecycle supervisor for live [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) sessions.
+面向活跃（宿主进程存活中的）[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 会话的、可持久、有预算的生命周期监督插件：以定时评估驱动，只依据会话生命周期事实做判断。
 
-> **Developer preview — community plugin.** DeepSeek Harness is pre-release
-> and may break compatibility. This is **not** an official DeepSeek product:
-> no DeepSeek endorsement, review, or store listing exists. Compatibility is
-> pinned per release in [docs/compatibility.md](docs/compatibility.md); never
-> install from `latest`.
+> **开发者预览 · 社区插件。** DeepSeek Harness 尚在预发布，兼容性可能随时破坏。
+> 本项目**不是** DeepSeek 官方产品：不存在官方背书、审核或商店收录。
+> 兼容版本按发布逐个锁定于 [docs/compatibility.md](docs/compatibility.md)；**不要裸装 `latest`**。
 
-## What it does
+## 它做什么
 
-You declare an explicit supervision contract over one root Agent session:
+用户对一个 root Agent 会话声明明确的监督契约：
 
-- `lifecycle_silence` — no qualifying durable lifecycle event for N seconds;
-- `deadline_unclosed` — an absolute RFC 3339 deadline passed and the guard is
-  still open;
-- `abnormal_turn_streak` — K consecutive `turn/end` results ended in
-  `error` / `blocked` / `max-tokens` / `interrupted`.
+- `lifecycle_silence` —— 连续 N 秒没有任何符合定义的 durable 生命周期事件；
+- `deadline_unclosed` —— 绝对 RFC 3339 截止时间已过、Guard 仍未关闭；
+- `abnormal_turn_streak` —— 连续 K 个 `turn/end` 以
+  `error` / `blocked` / `max-tokens` / `interrupted` 结束。
 
-When a policy first crosses its threshold and stays crossed for a
-confirmation window, the plugin forms one durable **incident**, records
-bounded evidence, and (if configured) queues **at most one** follow-up into
-the owner session. `completed` turns and fresh activity are recovery
-evidence; acknowledgements and resolutions are explicit and auditable.
+当策略首次越界并在确认窗口内持续成立时，插件形成一个可持久 **incident**，
+记录有界证据，并在配置允许时向 owner 会话排队**至多一次** follow-up。
+`completed` 轮次与新鲜活动是恢复证据；acknowledge 与 resolve 是显式且可审计的。
 
-The plugin **observes and notifies only**. It never runs shell commands,
-network requests, retries your tools, or cancels your agent. "Time passed" is
-not an authorization.
+插件**只观察、只通知**：不执行 shell、不发网络请求、不重试你的工具、不 cancel
+你的 Agent。「时间到了」不构成任何授权。
 
-## Hard limits (read before installing)
+## 硬限制（安装前必读）
 
-- **Host lifetime:** timers only run while the harness process is alive. The
-  plugin cannot supervise a cold session and does not wake your machine.
-- **Cold sessions:** silence time is re-anchored on resume; an already-lapsed
-  deadline coalesces into one incident on resume.
-- **At-least-once delivery:** a crash between queueing a follow-up and
-  persisting its receipt can duplicate one notification. Every notification
-  carries the same stable incident id so the model and UI can deduplicate.
-- **A hung agent cannot be rescued by this plugin:** if the owner agent never
-  finishes, follow-ups queue but are not consumed. The plugin will not cancel
-  the agent (a future cancel feature would be a separate, opt-in safety RFC).
-- **Session log integrity:** v1 writes nothing into the session log. The
-  plugin's state lives under `$DSH_HOME/plugins/session-supervisor/`. It can
-  be uninstalled at any time without affecting session resume.
-- **Single host, single process:** no multi-host coordination or leader
-  election.
+- **宿主生命周期**：计时只在 harness 进程存活期间进行；插件无法监督冷会话，也不会唤醒机器。
+- **冷会话**：resume 时 silence 重新锚定；已逾期的 deadline 在 resume 时合并为单个 incident。
+- **at-least-once 投递**：在「排队 follow-up」与「持久化收据」之间崩溃，可能重复一次通知；
+  每条通知携带同一个稳定 incident id，模型与 UI 可据此去重。
+- **挂死的 Agent 无法被本插件救回**：owner 永久不结束则 follow-up 排队而无人消费；
+  插件不会 cancel Agent（未来若要自动取消，须另行立项做独立安全 RFC 与显式 opt-in）。
+- **会话日志零污染**：v1 不向会话日志写任何事件；插件状态位于
+  `$DSH_HOME/plugins/session-supervisor/`，随时可卸载，不影响会话恢复。
+- **单宿主、单进程**：无多宿主协调或选主。
 
-## Install
+## 安装
 
-Prebuilt tarball (recommended — no install-time scripts):
+预构建 tarball（推荐，无安装期脚本）：
 
 ```bash
-dsh plugin --profile <name> add <path-to-tarball.tgz>
-# verify:
+dsh plugin --profile <name> add <tarball路径.tgz>
+# 验证：
 dsh --profile <name> --dump-config
 ```
 
-Or from npm once published:
+npm 发布后：
 
 ```bash
 dsh plugin --profile <name> add @<publisher>/dsh-session-supervisor@0.1.0-beta.1
 ```
 
-The bundle contributes the `dsh-session-supervisor` row. Later profile layers
-replace its whole `config` (no deep merge) — copy the full example below.
+bundle 贡献 `dsh-session-supervisor` 行。后层 profile 会**整对象替换**其
+`config`（不做深合并）——请复制下面的完整示例。
 
-## Configuration
+## 配置
 
 ```yaml
-# in your profile's cordis.patch.yml (full object, not a merge):
+# 写入 profile 的 cordis.patch.yml（完整对象，非合并）：
 - id: dsh-session-supervisor
   config:
     enabled: true
@@ -85,27 +73,30 @@ replace its whole `config` (no deep merge) — copy the full example below.
     logLevel: warn
 ```
 
-## Tools
+## 工具
 
-| Tool | Purpose |
+| 工具 | 职责 |
 |---|---|
-| `guardian_create` | Create a guard over the current root session |
-| `guardian_list` | List guards, control state, and policy phases (bounded) |
+| `guardian_create` | 在当前 root 会话创建 Guard |
+| `guardian_list` | 列出 Guard、控制状态与策略阶段（有界） |
 | `guardian_update` | `edit` / `pause` / `resume` / `acknowledge` / `close` |
-| `guardian_check_now` | One evaluation pass; records only real state transitions |
+| `guardian_check_now` | 单次评估；只记录真实发生的状态转换 |
 
-Tools refuse to run outside a root agent session (`OWNER_MISSING`), never
-leak stack traces or paths, and return stable error codes
-(`BAD_REQUEST`, `GUARD_NOT_FOUND`, `TOO_MANY_GUARDS`, `STORE_UNAVAILABLE`, …).
+工具在非 root Agent 会话中拒绝运行（`OWNER_MISSING`），不泄漏堆栈或路径，
+返回稳定错误码（`BAD_REQUEST`、`GUARD_NOT_FOUND`、`TOO_MANY_GUARDS`、
+`STORE_UNAVAILABLE` 等）。
 
-## Privacy and safety
+## 隐私与安全
 
-- No shell, HTTP, webhooks, or port listeners.
-- No file or environment reads beyond the plugin's own store.
-- Evidence is bounded, UTF-8 truncated with an explicit marker, and framed as
-  untrusted data — never instructions.
-- See [SECURITY.md](SECURITY.md) and [docs/threat-model.md](docs/threat-model.md).
+- 无 shell、HTTP、webhook 或端口监听。
+- 除插件自有 store 外不读文件与环境变量。
+- 证据有界、UTF-8 截断显式标记，并以「不可信数据」framing 呈现——绝不当指令。
+- 详见 [SECURITY.md](SECURITY.md) 与 [docs/threat-model.md](docs/threat-model.md)。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
+
+---
+
+English: [README.en.md](README.en.md)
